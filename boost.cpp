@@ -232,73 +232,121 @@ template<
         req.method() != http::verb::head &&
         req.method() != http::verb::post)
         return send(bad_request("Unknown HTTP-method"));
-
-    // Request path must be absolute and not contain "..".
-    if (req.target().empty() ||
-        req.target()[0] != '/' ||
-        req.target().find("..") != beast::string_view::npos)
-        return send(bad_request("Illegal request-target"));
-
-    // Build the path to the requested file
-    std::string path = path_cat(doc_root, req.target());
-    if (req.target().back() == '/')
-        path.append("index.html");
-
-    // Attempt to open the file
-    beast::error_code ec;
-    http::file_body::value_type body;
-    body.open(path.c_str(), beast::file_mode::scan, ec);
-
-    // Handle the case where the file doesn't exist
-    if (ec == beast::errc::no_such_file_or_directory)
-        return send(not_found(req.target()));
-
-    // Handle an unknown error
-    if (ec)
-        return send(server_error(ec.message()));
-
-    // Cache the size since we need it after the move
-    auto size = body.size();
-
-    // Respond to HEAD request
-    if (req.method() == http::verb::head)
-    {
-        http::response<http::empty_body> res{ http::status::ok, req.version() };
-        res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-        res.set(http::field::content_type, mime_type(path));
-        res.content_length(size);
-        res.keep_alive(req.keep_alive());
-        return send(std::move(res));
-    }
-
-    // Respond to GET request
-    if (req.method() == http::verb::get) {
-        http::response<http::file_body> res{
-            std::piecewise_construct,
-            std::make_tuple(std::move(body)),
-            std::make_tuple(http::status::ok, req.version()) };
-        res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-        res.set(http::field::content_type, mime_type(path));
-        res.content_length(size);
-        res.keep_alive(req.keep_alive());
-        return send(std::move(res));
-    }
-
-    // Respond to post request
-    std::string respones = "Uploaded!";
-    if (req.method() == http::verb::post) {
-        std::fstream fs("main.lua", std::fstream::out);
-        fs << req.body();
-        fs.close();
+    
+    //handle methods
+    if (req.target()[1] == 'M') {
+        std::string_view view (req.target().data(),req.target().size());
+        view.remove_prefix(2);
+        auto tmp = view.substr(0, view.find('?'));
+        std::string_view m_setresp = "setresp";
+        if (std::equal(tmp.begin(), tmp.end(), m_setresp.begin(), m_setresp.end())) {
+            view.remove_prefix(tmp.size() + 1);
+            auto pos = view.find('=');
+            std::string resp, com;
+            if (view[pos - 1] == 'r') {
+                auto pos2 = view.find('&');
+                resp = view.substr(pos + 1, pos2 - pos - 1);
+                view.remove_prefix(resp.size() + 5);
+                com = view;
+            }
+            else {
+                auto pos2 = view.find('&');
+                com = view.substr(pos + 1, pos2 - pos - 1);
+                view.remove_prefix(com.size() + 5);
+                resp = view;
+            }
+            std::string sql_req = "insert into public.resp(com, resp) values('";
+            sql_req += com;
+            sql_req += "','";
+            sql_req += resp;
+            sql_req += "')";
+            res = PQexec(conn, sql_req.c_str());
+            if (PQresultStatus(res) != PGRES_COMMAND_OK)
+            {
+                std::cout<<"error: "<<PQerrorMessage(conn)<<'\n';
+                PQclear(res);
+                exit_nicely(conn);
+            }
+            PQclear(res);
+        }
         http::response<http::string_body> res{
-            std::piecewise_construct,
-            std::make_tuple(respones),
-            std::make_tuple(http::status::ok, req.version()) };
+                std::piecewise_construct,
+                std::make_tuple(req.target()),
+                std::make_tuple(http::status::ok, req.version()) };
         res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
         res.set(http::field::content_type, "text/html");
-        res.content_length(respones.size());
+        res.content_length(req.target().size());
         res.keep_alive(req.keep_alive());
         return send(std::move(res));
+    }
+    else {
+        // Request path must be absolute and not contain "..".
+        if (req.target().empty() ||
+            req.target()[0] != '/' ||
+            req.target().find("..") != beast::string_view::npos)
+            return send(bad_request("Illegal request-target"));
+
+        // Build the path to the requested file
+        std::string path = path_cat(doc_root, req.target());
+        if (req.target().back() == '/')
+            path.append("index.html");
+
+        // Attempt to open the file
+        beast::error_code ec;
+        http::file_body::value_type body;
+        body.open(path.c_str(), beast::file_mode::scan, ec);
+
+        // Handle the case where the file doesn't exist
+        if (ec == beast::errc::no_such_file_or_directory)
+            return send(not_found(req.target()));
+
+        // Handle an unknown error
+        if (ec)
+            return send(server_error(ec.message()));
+
+        // Cache the size since we need it after the move
+        auto size = body.size();
+
+        // Respond to HEAD request
+        if (req.method() == http::verb::head)
+        {
+            http::response<http::empty_body> res{ http::status::ok, req.version() };
+            res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+            res.set(http::field::content_type, mime_type(path));
+            res.content_length(size);
+            res.keep_alive(req.keep_alive());
+            return send(std::move(res));
+        }
+
+        // Respond to GET request
+        if (req.method() == http::verb::get) {
+            http::response<http::file_body> res{
+                std::piecewise_construct,
+                std::make_tuple(std::move(body)),
+                std::make_tuple(http::status::ok, req.version()) };
+            res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+            res.set(http::field::content_type, mime_type(path));
+            res.content_length(size);
+            res.keep_alive(req.keep_alive());
+            return send(std::move(res));
+        }
+
+        // Respond to post request
+        std::string respones = "Uploaded!";
+        if (req.method() == http::verb::post) {
+            std::fstream fs("main.lua", std::fstream::out);
+            fs << req.body();
+            fs.close();
+            http::response<http::string_body> res{
+                std::piecewise_construct,
+                std::make_tuple(respones),
+                std::make_tuple(http::status::ok, req.version()) };
+            res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+            res.set(http::field::content_type, "text/html");
+            res.content_length(respones.size());
+            res.keep_alive(req.keep_alive());
+            return send(std::move(res));
+        }
     }
 
 }
