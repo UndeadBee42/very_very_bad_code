@@ -1,7 +1,8 @@
 #include "libpq-fe.h"
+#include <cstdlib>
 static void
 exit_nicely(PGconn* conn)
 {
     PQfinish(conn);
-    exit(1);
+    std::exit(1);
 }
